@@ -49,8 +49,27 @@ function AuthModal({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: (
     if (result.data.session) { toast.success(mode === "login" ? "바로 로그인했어요." : "계정을 만들고 로그인했어요."); onSignedIn(); onClose(); }
     else setMessage("확인 메일을 한 번만 열어주세요. 다음부터는 비밀번호로 바로 로그인됩니다.");
   };
-  const resetPassword = async () => { const supabase = getSupabase(); if (!supabase || !email) return toast.error("이메일을 먼저 입력해주세요."); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin }); if (error) toast.error(error.message); else setMessage("비밀번호 설정 메일을 보냈어요. 이 과정은 한 번만 필요해요."); };
+  const resetPassword = async () => { const supabase = getSupabase(); if (!supabase || !email) return toast.error("이메일을 먼저 입력해주세요."); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?recovery=1` }); if (error) toast.error(error.message.toLowerCase().includes("rate limit") ? "인증 메일 요청 한도를 넘었어요. 잠시 후 다시 시도하거나, 이미 받은 최신 메일의 링크를 이용해주세요." : error.message); else setMessage("비밀번호 설정 메일을 보냈어요. 가장 최근에 받은 메일의 링크를 열어주세요."); };
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="icon-btn close" onClick={onClose}><X /></button><div className="modal-mark"><Sparkles /></div><h2>{mode === "login" ? "바로 로그인" : "새 계정 만들기"}</h2><p>한 번 로그인하면 이 브라우저에서 상태가 유지돼요. 더 이상 매번 이메일 링크를 열 필요가 없습니다.</p><div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>로그인</button><button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>회원가입</button></div><label>이메일</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" autoComplete="email"/><label>비밀번호</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="6자 이상" autoComplete={mode === "login" ? "current-password" : "new-password"} onKeyDown={e => e.key === "Enter" && submit()}/>{message && <div className="success-box"><Check /> {message}</div>}<button className="primary wide" disabled={loading} onClick={submit}>{loading ? <LoaderCircle className="spin"/> : <LogIn/>}{mode === "login" ? "로그인" : "계정 만들기"}</button>{mode === "login" && <button className="text-button auth-help" onClick={resetPassword}>기존 이메일 계정인가요? 비밀번호 만들기</button>}</div></div>;
+}
+
+function PasswordUpdateModal({ onClose }: { onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const updatePassword = async () => {
+    const supabase = getSupabase();
+    if (!supabase) return toast.error("Supabase 연결이 필요해요.");
+    if (password.length < 6) return toast.error("새 비밀번호는 6자 이상이어야 해요.");
+    if (password !== confirmPassword) return toast.error("두 비밀번호가 서로 달라요.");
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) return toast.error(error.message);
+    toast.success("새 비밀번호를 저장했어요. 이제 바로 로그인할 수 있습니다.");
+    onClose();
+  };
+  return <div className="modal-backdrop"><div className="modal"><div className="modal-mark"><Check /></div><h2>새 비밀번호 설정</h2><p>메일 인증이 완료됐어요. Cardory에서 사용할 새 비밀번호를 두 번 입력해주세요.</p><label>새 비밀번호</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="6자 이상" autoComplete="new-password"/><label>비밀번호 확인</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="한 번 더 입력" autoComplete="new-password" onKeyDown={e => e.key === "Enter" && updatePassword()}/><button className="primary wide" disabled={loading} onClick={updatePassword}>{loading ? <LoaderCircle className="spin"/> : <Check/>}비밀번호 저장하고 시작하기</button></div></div>;
 }
 
 export default function Home() {
@@ -65,6 +84,7 @@ export default function Home() {
   const [sourceFile, setSourceFile] = useState<File>();
   const [useCharacter, setUseCharacter] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showPasswordUpdate, setShowPasswordUpdate] = useState(false);
   const [userEmail, setUserEmail] = useState<string>();
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -74,8 +94,15 @@ export default function Home() {
 
   useEffect(() => {
     const supabase = getSupabase(); if (!supabase) return;
+    const params = new URLSearchParams(location.search);
+    const code = params.get("code");
+    if (code) supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+      if (error) toast.error("인증 링크가 만료됐거나 이미 사용됐어요. 가장 최근 메일의 링크를 열어주세요.");
+      else setShowPasswordUpdate(true);
+      window.history.replaceState({}, "", location.pathname);
+    });
     supabase.auth.getUser().then(({ data }) => { setUserEmail(data.user?.email); if (data.user) loadHistory(); });
-    const { data } = supabase.auth.onAuthStateChange((_e, session) => { setUserEmail(session?.user.email); if (session?.user) loadHistory(); });
+    const { data } = supabase.auth.onAuthStateChange((event, session) => { setUserEmail(session?.user.email); if (session?.user) loadHistory(); if (event === "PASSWORD_RECOVERY") setShowPasswordUpdate(true); });
     return () => data.subscription.unsubscribe();
   }, []);
 
@@ -168,5 +195,6 @@ export default function Home() {
       <aside className="editor"><div className="editor-head"><small>CARD {String(active + 1).padStart(2, "0")}</small><h2>내용과 디자인</h2></div><label>제목 <span>{current.title.length}/40</span></label><textarea value={current.title} maxLength={40} rows={2} onChange={e => updateCard({ title: e.target.value })}/><label>본문 <span>{current.body.length}/140</span></label><textarea value={current.body} maxLength={140} rows={4} onChange={e => updateCard({ body: e.target.value })}/><label>이미지 설명</label><textarea value={current.imagePrompt} rows={4} onChange={e => updateCard({ imagePrompt: e.target.value })}/><button className="secondary wide" disabled={!!busy} onClick={regenerateImage}><RefreshCw /> 이미지만 다시 만들기</button><div className="divider"/><div className="section-label"><Palette /> 디자인</div><label>텍스트 위치</label><div className="segmented">{(["top", "center", "bottom"] as const).map(v => <button className={current.design.position === v ? "active" : ""} key={v} onClick={() => updateDesign({ position: v })}>{v === "top" ? "상단" : v === "center" ? "중앙" : "하단"}</button>)}</div><label>정렬</label><div className="segmented">{(["left", "center"] as const).map(v => <button className={current.design.align === v ? "active" : ""} key={v} onClick={() => updateDesign({ align: v })}>{v === "left" ? "왼쪽" : "가운데"}</button>)}</div><label>배경 어둡기 <span>{current.design.overlay}%</span></label><input type="range" min="10" max="80" value={current.design.overlay} onChange={e => updateDesign({ overlay: Number(e.target.value) })}/><div className="colors"><label>글자색<input type="color" value={current.design.textColor} onChange={e => updateDesign({ textColor: e.target.value })}/></label><label>포인트<input type="color" value={current.design.accentColor} onChange={e => updateDesign({ accentColor: e.target.value })}/></label></div><div className="editor-bottom"><button className="danger" onClick={removeCard}><Trash2 /> 삭제</button><div><button className="icon-btn" onClick={() => move(active, active - 1)}><ArrowLeft /></button><button className="icon-btn" onClick={() => move(active, active + 1)}><ArrowRight /></button></div></div></aside>
     </section>}
     {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSignedIn={() => {}}/>}
+    {showPasswordUpdate && <PasswordUpdateModal onClose={() => setShowPasswordUpdate(false)}/>}
   </main>;
 }
