@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronRight, Download, GripVertical, History, ImagePlus, LoaderCircle, LogIn, LogOut, Palette, Plus, RefreshCw, Save, Sparkles, Trash2, Upload, UserRound, WandSparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Download, GripVertical, History, ImagePlus, LoaderCircle, LogIn, LogOut, Palette, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, UserRound, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { getSupabase } from "@/lib/supabase";
 import { CardItem, ProjectData, SIZE_MAP, SizeKey } from "@/lib/types";
@@ -32,15 +32,25 @@ function CardCanvas({ card, size, preview = false }: { card: CardItem; size: Siz
 
 function AuthModal({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: () => void }) {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
   const submit = async () => {
     const supabase = getSupabase();
     if (!supabase) return toast.error("Supabase 환경 변수가 아직 연결되지 않았어요.");
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
-    if (error) return toast.error(error.message);
-    setSent(true); onSignedIn();
+    if (!email || password.length < 6) return toast.error("이메일과 6자 이상의 비밀번호를 입력해주세요.");
+    setLoading(true); setMessage("");
+    const result = mode === "login"
+      ? await supabase.auth.signInWithPassword({ email, password })
+      : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } });
+    setLoading(false);
+    if (result.error) return toast.error(result.error.message === "Invalid login credentials" ? "이메일 또는 비밀번호를 확인해주세요." : result.error.message);
+    if (result.data.session) { toast.success(mode === "login" ? "바로 로그인했어요." : "계정을 만들고 로그인했어요."); onSignedIn(); onClose(); }
+    else setMessage("확인 메일을 한 번만 열어주세요. 다음부터는 비밀번호로 바로 로그인됩니다.");
   };
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="icon-btn close" onClick={onClose}><X /></button><div className="modal-mark"><Sparkles /></div><h2>내 작업을 안전하게 보관하세요</h2><p>이메일로 받은 로그인 링크를 누르면 모든 카드뉴스 기록을 언제든 다시 열 수 있어요.</p>{sent ? <div className="success-box"><Check /> 로그인 링크를 보냈어요. 이메일을 확인해주세요.</div> : <><label>이메일</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" /><button className="primary wide" onClick={submit}>로그인 링크 받기 <ChevronRight /></button></>}</div></div>;
+  const resetPassword = async () => { const supabase = getSupabase(); if (!supabase || !email) return toast.error("이메일을 먼저 입력해주세요."); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: location.origin }); if (error) toast.error(error.message); else setMessage("비밀번호 설정 메일을 보냈어요. 이 과정은 한 번만 필요해요."); };
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="icon-btn close" onClick={onClose}><X /></button><div className="modal-mark"><Sparkles /></div><h2>{mode === "login" ? "바로 로그인" : "새 계정 만들기"}</h2><p>한 번 로그인하면 이 브라우저에서 상태가 유지돼요. 더 이상 매번 이메일 링크를 열 필요가 없습니다.</p><div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>로그인</button><button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>회원가입</button></div><label>이메일</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" autoComplete="email"/><label>비밀번호</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="6자 이상" autoComplete={mode === "login" ? "current-password" : "new-password"} onKeyDown={e => e.key === "Enter" && submit()}/>{message && <div className="success-box"><Check /> {message}</div>}<button className="primary wide" disabled={loading} onClick={submit}>{loading ? <LoaderCircle className="spin"/> : <LogIn/>}{mode === "login" ? "로그인" : "계정 만들기"}</button>{mode === "login" && <button className="text-button auth-help" onClick={resetPassword}>기존 이메일 계정인가요? 비밀번호 만들기</button>}</div></div>;
 }
 
 export default function Home() {
@@ -58,6 +68,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string>();
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const current = cards[active];
 
@@ -131,11 +142,12 @@ export default function Home() {
   }
   async function loadHistory() { const supabase = getSupabase(); if (!supabase) return; const { data } = await supabase.from("card_projects").select("*").order("created_at", { ascending: false }).limit(30); setHistory(data || []); }
   function openHistory(item: any) { const d = item.data as ProjectData; setPersona(d.persona); setTopic(d.topic); setSize(d.size); setCards(d.cards); setCharacter(d.characterSheet); setUseCharacter(!!d.characterSheet); setActive(0); setShowHistory(false); }
+  async function deleteHistory(id: string) { if (!confirm("이 카드뉴스 기록을 삭제할까요?")) return; const supabase = getSupabase(); if (!supabase) return; const { error } = await supabase.from("card_projects").delete().eq("id", id); if (error) toast.error(error.message); else { setHistory(history.filter(h => h.id !== id)); toast.success("기록을 삭제했어요."); } }
   async function signOut() { await getSupabase()?.auth.signOut(); setUserEmail(undefined); toast.success("로그아웃했어요."); }
 
   return <main>
     <header><a className="brand" href="#"><span><Sparkles /></span>Cardory</a><nav><button className="ghost" onClick={() => { loadHistory(); setShowHistory(!showHistory); }}><History /> 작업 기록</button>{userEmail ? <button className="user-pill" onClick={signOut}><span>{userEmail[0].toUpperCase()}</span>{userEmail}<LogOut /></button> : <button className="outline" onClick={() => setShowAuth(true)}><LogIn /> 로그인</button>}</nav></header>
-    {showHistory && <aside className="history-panel"><div className="panel-title"><div><small>MY ARCHIVE</small><h3>작업 기록</h3></div><button className="icon-btn" onClick={() => setShowHistory(false)}><X /></button></div>{history.length ? history.map(h => <button className="history-item" key={h.id} onClick={() => openHistory(h)}><span>{h.card_count}</span><div><strong>{h.title}</strong><small>{new Date(h.created_at).toLocaleDateString("ko-KR")} · {h.topic}</small></div><ChevronRight /></button>) : <div className="empty-history"><History /><p>저장한 카드뉴스가 아직 없어요.</p></div>}</aside>}
+    {showHistory && <div className="archive-backdrop"><section className="archive-shell"><div className="archive-head"><div><small>MY CARDORY</small><h2>카드뉴스 보관함</h2><p>만들었던 카드뉴스를 한곳에서 다시 열고 관리하세요.</p></div><div className="archive-head-actions"><button className="outline" onClick={() => { setShowHistory(false); setCards([]); }}><Plus/> 새 카드뉴스</button><button className="icon-btn" onClick={() => setShowHistory(false)}><X/></button></div></div>{userEmail ? <><div className="archive-toolbar"><div className="archive-search"><Search/><input value={historySearch} onChange={e => setHistorySearch(e.target.value)} placeholder="제목이나 주제 검색"/></div><span>전체 {history.length}개</span></div><div className="archive-grid">{history.filter(h => `${h.title} ${h.topic}`.toLowerCase().includes(historySearch.toLowerCase())).map(h => <article className="project-card" key={h.id}><button className="project-preview" onClick={() => openHistory(h)}>{h.data?.cards?.[0]?.image ? <img src={h.data.cards[0].image} alt=""/> : <div className="project-empty"><Sparkles/></div>}<span>{h.card_count}장</span></button><div className="project-meta"><button onClick={() => openHistory(h)}><strong>{h.title}</strong><small>{new Date(h.created_at).toLocaleDateString("ko-KR")} · {h.topic}</small></button><button className="project-delete" onClick={() => deleteHistory(h.id)} aria-label={`${h.title} 삭제`}><Trash2/></button></div></article>)}</div>{!history.length && <div className="empty-history"><History/><h3>아직 저장한 카드뉴스가 없어요</h3><p>카드뉴스를 만든 뒤 저장하면 이곳에 차곡차곡 모입니다.</p><button className="primary" onClick={() => setShowHistory(false)}><Plus/> 첫 카드뉴스 만들기</button></div>}</> : <div className="empty-history archive-login"><UserRound/><h3>로그인하면 작업을 한곳에 모을 수 있어요</h3><p>비밀번호로 한 번 로그인하면 다음 방문에도 유지됩니다.</p><button className="primary" onClick={() => setShowAuth(true)}><LogIn/> 바로 로그인</button></div>}</section></div>}
 
     {!cards.length ? <section className="landing">
       <div className="hero-copy"><div className="eyebrow"><span /> YOUR STORY, BEAUTIFULLY TOLD</div><h1>브랜드의 생각을<br/><em>눈에 머무는 이야기</em>로.</h1><p>페르소나와 주제만 알려주세요. 글의 흐름부터 일관된 비주얼까지, 나만의 카드뉴스 스튜디오.</p><div className="trust"><div><strong>01</strong><span>브랜드 맞춤 글</span></div><div><strong>02</strong><span>일관된 비주얼</span></div><div><strong>03</strong><span>자유로운 편집</span></div></div></div>
