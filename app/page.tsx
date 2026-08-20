@@ -30,46 +30,21 @@ function CardCanvas({ card, size, preview = false }: { card: CardItem; size: Siz
   );
 }
 
-function AuthModal({ onClose, onSignedIn }: { onClose: () => void; onSignedIn: () => void }) {
+function AuthModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const submit = async () => {
     const supabase = getSupabase();
     if (!supabase) return toast.error("Supabase 환경 변수가 아직 연결되지 않았어요.");
-    if (!email || password.length < 6) return toast.error("이메일과 6자 이상의 비밀번호를 입력해주세요.");
+    if (!email) return toast.error("이메일 주소를 입력해주세요.");
     setLoading(true); setMessage("");
-    const result = mode === "login"
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } });
+    const result = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin, shouldCreateUser: true } });
     setLoading(false);
-    if (result.error) return toast.error(result.error.message === "Invalid login credentials" ? "이메일 또는 비밀번호를 확인해주세요." : result.error.message);
-    if (result.data.session) { toast.success(mode === "login" ? "바로 로그인했어요." : "계정을 만들고 로그인했어요."); onSignedIn(); onClose(); }
-    else setMessage("확인 메일을 한 번만 열어주세요. 다음부터는 비밀번호로 바로 로그인됩니다.");
+    if (result.error) return toast.error(result.error.message.toLowerCase().includes("rate limit") ? "이메일 요청 한도를 넘었어요. 잠시 후 한 번만 다시 시도해주세요." : result.error.message);
+    setMessage("로그인 메일을 보냈어요. 네이버 메일에서 가장 최근 로그인 링크를 열어주세요.");
   };
-  const resetPassword = async () => { const supabase = getSupabase(); if (!supabase || !email) return toast.error("이메일을 먼저 입력해주세요."); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?recovery=1` }); if (error) toast.error(error.message.toLowerCase().includes("rate limit") ? "인증 메일 요청 한도를 넘었어요. 잠시 후 다시 시도하거나, 이미 받은 최신 메일의 링크를 이용해주세요." : error.message); else setMessage("비밀번호 설정 메일을 보냈어요. 가장 최근에 받은 메일의 링크를 열어주세요."); };
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="icon-btn close" onClick={onClose}><X /></button><div className="modal-mark"><Sparkles /></div><h2>{mode === "login" ? "바로 로그인" : "새 계정 만들기"}</h2><p>한 번 로그인하면 이 브라우저에서 상태가 유지돼요. 더 이상 매번 이메일 링크를 열 필요가 없습니다.</p><div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>로그인</button><button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>회원가입</button></div><label>이메일</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" autoComplete="email"/><label>비밀번호</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="6자 이상" autoComplete={mode === "login" ? "current-password" : "new-password"} onKeyDown={e => e.key === "Enter" && submit()}/>{message && <div className="success-box"><Check /> {message}</div>}<button className="primary wide" disabled={loading} onClick={submit}>{loading ? <LoaderCircle className="spin"/> : <LogIn/>}{mode === "login" ? "로그인" : "계정 만들기"}</button>{mode === "login" && <button className="text-button auth-help" onClick={resetPassword}>기존 이메일 계정인가요? 비밀번호 만들기</button>}</div></div>;
-}
-
-function PasswordUpdateModal({ onClose }: { onClose: () => void }) {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const updatePassword = async () => {
-    const supabase = getSupabase();
-    if (!supabase) return toast.error("Supabase 연결이 필요해요.");
-    if (password.length < 6) return toast.error("새 비밀번호는 6자 이상이어야 해요.");
-    if (password !== confirmPassword) return toast.error("두 비밀번호가 서로 달라요.");
-    setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
-    if (error) return toast.error(error.message);
-    toast.success("새 비밀번호를 저장했어요. 이제 바로 로그인할 수 있습니다.");
-    onClose();
-  };
-  return <div className="modal-backdrop"><div className="modal"><div className="modal-mark"><Check /></div><h2>새 비밀번호 설정</h2><p>메일 인증이 완료됐어요. Cardory에서 사용할 새 비밀번호를 두 번 입력해주세요.</p><label>새 비밀번호</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="6자 이상" autoComplete="new-password"/><label>비밀번호 확인</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="한 번 더 입력" autoComplete="new-password" onKeyDown={e => e.key === "Enter" && updatePassword()}/><button className="primary wide" disabled={loading} onClick={updatePassword}>{loading ? <LoaderCircle className="spin"/> : <Check/>}비밀번호 저장하고 시작하기</button></div></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={e => e.stopPropagation()}><button className="icon-btn close" onClick={onClose}><X /></button><div className="modal-mark"><Sparkles /></div><h2>이메일로 로그인</h2><p>비밀번호 없이 이메일로 받은 로그인 링크만 누르면 바로 접속할 수 있어요.</p><label>이메일</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" autoComplete="email" onKeyDown={e => e.key === "Enter" && submit()}/>{message && <div className="success-box"><Check /> {message}</div>}<button className="primary wide" disabled={loading || !!message} onClick={submit}>{loading ? <LoaderCircle className="spin"/> : <LogIn/>}{message ? "메일을 확인해주세요" : "로그인 메일 받기"}</button><p>메일이 안 보이면 스팸메일함을 확인해주세요. 버튼은 한 번만 누르는 것이 좋아요.</p></div></div>;
 }
 
 export default function Home() {
@@ -84,7 +59,6 @@ export default function Home() {
   const [sourceFile, setSourceFile] = useState<File>();
   const [useCharacter, setUseCharacter] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
-  const [showPasswordUpdate, setShowPasswordUpdate] = useState(false);
   const [userEmail, setUserEmail] = useState<string>();
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -98,11 +72,11 @@ export default function Home() {
     const code = params.get("code");
     if (code) supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
       if (error) toast.error("인증 링크가 만료됐거나 이미 사용됐어요. 가장 최근 메일의 링크를 열어주세요.");
-      else setShowPasswordUpdate(true);
+      else toast.success("이메일 확인이 완료되어 로그인했어요.");
       window.history.replaceState({}, "", location.pathname);
     });
     supabase.auth.getUser().then(({ data }) => { setUserEmail(data.user?.email); if (data.user) loadHistory(); });
-    const { data } = supabase.auth.onAuthStateChange((event, session) => { setUserEmail(session?.user.email); if (session?.user) loadHistory(); if (event === "PASSWORD_RECOVERY") setShowPasswordUpdate(true); });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => { setUserEmail(session?.user.email); if (session?.user) loadHistory(); });
     return () => data.subscription.unsubscribe();
   }, []);
 
@@ -174,7 +148,7 @@ export default function Home() {
 
   return <main>
     <header><a className="brand" href="#"><span><Sparkles /></span>Cardory</a><nav><button className="ghost" onClick={() => { loadHistory(); setShowHistory(!showHistory); }}><History /> 작업 기록</button>{userEmail ? <button className="user-pill" onClick={signOut}><span>{userEmail[0].toUpperCase()}</span>{userEmail}<LogOut /></button> : <button className="outline" onClick={() => setShowAuth(true)}><LogIn /> 로그인</button>}</nav></header>
-    {showHistory && <div className="archive-backdrop"><section className="archive-shell"><div className="archive-head"><div><small>MY CARDORY</small><h2>카드뉴스 보관함</h2><p>만들었던 카드뉴스를 한곳에서 다시 열고 관리하세요.</p></div><div className="archive-head-actions"><button className="outline" onClick={() => { setShowHistory(false); setCards([]); }}><Plus/> 새 카드뉴스</button><button className="icon-btn" onClick={() => setShowHistory(false)}><X/></button></div></div>{userEmail ? <><div className="archive-toolbar"><div className="archive-search"><Search/><input value={historySearch} onChange={e => setHistorySearch(e.target.value)} placeholder="제목이나 주제 검색"/></div><span>전체 {history.length}개</span></div><div className="archive-grid">{history.filter(h => `${h.title} ${h.topic}`.toLowerCase().includes(historySearch.toLowerCase())).map(h => <article className="project-card" key={h.id}><button className="project-preview" onClick={() => openHistory(h)}>{h.data?.cards?.[0]?.image ? <img src={h.data.cards[0].image} alt=""/> : <div className="project-empty"><Sparkles/></div>}<span>{h.card_count}장</span></button><div className="project-meta"><button onClick={() => openHistory(h)}><strong>{h.title}</strong><small>{new Date(h.created_at).toLocaleDateString("ko-KR")} · {h.topic}</small></button><button className="project-delete" onClick={() => deleteHistory(h.id)} aria-label={`${h.title} 삭제`}><Trash2/></button></div></article>)}</div>{!history.length && <div className="empty-history"><History/><h3>아직 저장한 카드뉴스가 없어요</h3><p>카드뉴스를 만든 뒤 저장하면 이곳에 차곡차곡 모입니다.</p><button className="primary" onClick={() => setShowHistory(false)}><Plus/> 첫 카드뉴스 만들기</button></div>}</> : <div className="empty-history archive-login"><UserRound/><h3>로그인하면 작업을 한곳에 모을 수 있어요</h3><p>비밀번호로 한 번 로그인하면 다음 방문에도 유지됩니다.</p><button className="primary" onClick={() => setShowAuth(true)}><LogIn/> 바로 로그인</button></div>}</section></div>}
+    {showHistory && <div className="archive-backdrop"><section className="archive-shell"><div className="archive-head"><div><small>MY CARDORY</small><h2>카드뉴스 보관함</h2><p>만들었던 카드뉴스를 한곳에서 다시 열고 관리하세요.</p></div><div className="archive-head-actions"><button className="outline" onClick={() => { setShowHistory(false); setCards([]); }}><Plus/> 새 카드뉴스</button><button className="icon-btn" onClick={() => setShowHistory(false)}><X/></button></div></div>{userEmail ? <><div className="archive-toolbar"><div className="archive-search"><Search/><input value={historySearch} onChange={e => setHistorySearch(e.target.value)} placeholder="제목이나 주제 검색"/></div><span>전체 {history.length}개</span></div><div className="archive-grid">{history.filter(h => `${h.title} ${h.topic}`.toLowerCase().includes(historySearch.toLowerCase())).map(h => <article className="project-card" key={h.id}><button className="project-preview" onClick={() => openHistory(h)}>{h.data?.cards?.[0]?.image ? <img src={h.data.cards[0].image} alt=""/> : <div className="project-empty"><Sparkles/></div>}<span>{h.card_count}장</span></button><div className="project-meta"><button onClick={() => openHistory(h)}><strong>{h.title}</strong><small>{new Date(h.created_at).toLocaleDateString("ko-KR")} · {h.topic}</small></button><button className="project-delete" onClick={() => deleteHistory(h.id)} aria-label={`${h.title} 삭제`}><Trash2/></button></div></article>)}</div>{!history.length && <div className="empty-history"><History/><h3>아직 저장한 카드뉴스가 없어요</h3><p>카드뉴스를 만든 뒤 저장하면 이곳에 차곡차곡 모입니다.</p><button className="primary" onClick={() => setShowHistory(false)}><Plus/> 첫 카드뉴스 만들기</button></div>}</> : <div className="empty-history archive-login"><UserRound/><h3>로그인하면 작업을 한곳에 모을 수 있어요</h3><p>이메일로 받은 로그인 링크를 누르면 작업 기록을 볼 수 있어요.</p><button className="primary" onClick={() => setShowAuth(true)}><LogIn/> 이메일로 로그인</button></div>}</section></div>}
 
     {!cards.length ? <section className="landing">
       <div className="hero-copy"><div className="eyebrow"><span /> YOUR STORY, BEAUTIFULLY TOLD</div><h1>브랜드의 생각을<br/><em>눈에 머무는 이야기</em>로.</h1><p>페르소나와 주제만 알려주세요. 글의 흐름부터 일관된 비주얼까지, 나만의 카드뉴스 스튜디오.</p><div className="trust"><div><strong>01</strong><span>브랜드 맞춤 글</span></div><div><strong>02</strong><span>일관된 비주얼</span></div><div><strong>03</strong><span>자유로운 편집</span></div></div></div>
@@ -194,7 +168,6 @@ export default function Home() {
       <div className="stage"><div className="stage-top"><button className="ghost" onClick={() => setCards([])}><ArrowLeft /> 처음부터</button><div className="stage-actions"><button className="outline" onClick={saveProject}><Save /> 저장</button><button className="primary" onClick={downloadAll}><Download /> PNG 전체 받기</button></div></div><div className={`canvas-wrap ${size}`}><CardCanvas card={current} size={size}/>{busy && <div className="canvas-loading"><LoaderCircle className="spin"/><strong>{busy}</strong><small>고해상도 이미지는 잠시 시간이 걸려요</small></div>}</div><div className="canvas-nav"><button className="icon-btn" disabled={active === 0} onClick={() => setActive(active - 1)}><ArrowLeft /></button><span><strong>{active + 1}</strong> / {cards.length}</span><button className="icon-btn" disabled={active === cards.length - 1} onClick={() => setActive(active + 1)}><ArrowRight /></button></div></div>
       <aside className="editor"><div className="editor-head"><small>CARD {String(active + 1).padStart(2, "0")}</small><h2>내용과 디자인</h2></div><label>제목 <span>{current.title.length}/40</span></label><textarea value={current.title} maxLength={40} rows={2} onChange={e => updateCard({ title: e.target.value })}/><label>본문 <span>{current.body.length}/140</span></label><textarea value={current.body} maxLength={140} rows={4} onChange={e => updateCard({ body: e.target.value })}/><label>이미지 설명</label><textarea value={current.imagePrompt} rows={4} onChange={e => updateCard({ imagePrompt: e.target.value })}/><button className="secondary wide" disabled={!!busy} onClick={regenerateImage}><RefreshCw /> 이미지만 다시 만들기</button><div className="divider"/><div className="section-label"><Palette /> 디자인</div><label>텍스트 위치</label><div className="segmented">{(["top", "center", "bottom"] as const).map(v => <button className={current.design.position === v ? "active" : ""} key={v} onClick={() => updateDesign({ position: v })}>{v === "top" ? "상단" : v === "center" ? "중앙" : "하단"}</button>)}</div><label>정렬</label><div className="segmented">{(["left", "center"] as const).map(v => <button className={current.design.align === v ? "active" : ""} key={v} onClick={() => updateDesign({ align: v })}>{v === "left" ? "왼쪽" : "가운데"}</button>)}</div><label>배경 어둡기 <span>{current.design.overlay}%</span></label><input type="range" min="10" max="80" value={current.design.overlay} onChange={e => updateDesign({ overlay: Number(e.target.value) })}/><div className="colors"><label>글자색<input type="color" value={current.design.textColor} onChange={e => updateDesign({ textColor: e.target.value })}/></label><label>포인트<input type="color" value={current.design.accentColor} onChange={e => updateDesign({ accentColor: e.target.value })}/></label></div><div className="editor-bottom"><button className="danger" onClick={removeCard}><Trash2 /> 삭제</button><div><button className="icon-btn" onClick={() => move(active, active - 1)}><ArrowLeft /></button><button className="icon-btn" onClick={() => move(active, active + 1)}><ArrowRight /></button></div></div></aside>
     </section>}
-    {showAuth && <AuthModal onClose={() => setShowAuth(false)} onSignedIn={() => {}}/>}
-    {showPasswordUpdate && <PasswordUpdateModal onClose={() => setShowPasswordUpdate(false)}/>}
+    {showAuth && <AuthModal onClose={() => setShowAuth(false)}/>}
   </main>;
 }
